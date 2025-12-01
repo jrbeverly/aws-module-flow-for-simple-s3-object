@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Self-contained static website served through CloudFront OAC.
+
+Resources:
+
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${AWS::StackName}-oac'
+        Description: Access from CloudFront to the private website bucket
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Origins:
+          - Id: WebsiteOrigin
+            DomainName: !GetAtt WebsiteBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig: {}
+        DefaultCacheBehavior:
+          TargetOriginId: WebsiteOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          # TTL 0 keeps updates observable without an invalidation provider.
+          MinTTL: 0
+          DefaultTTL: 0
+          MaxTTL: 0
+
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - s3:GetObject
+            Resource: !Sub '${WebsiteBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+  S3ObjectProvider:
+    Type: Company::S3::ObjectProvider::MODULE
+    Properties:
+      BucketArn: !GetAtt WebsiteBucket.Arn
+
+  IndexHtml:
+    Type: Custom::S3Object
+    Properties:
+      ServiceToken: !GetAtt S3ObjectProvider.Handler.Arn
+      Bucket: !Ref WebsiteBucket
+      Key: index.html
+      ContentType: text/html
+      Body: |
+        <!doctype html>
+        <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Hello from CloudFormation</title>
+          </head>
+          <body>
+            <main>
+              <h1>Hello from CloudFormation</h1>
+              <p>
+                The bucket, distribution, provider, and contents of this
+                website were all provisioned by this stack.
+              </p>
+            </main>
+          </body>
+        </html>
+
+Outputs:
+
+  WebsiteUrl:
+    Description: CloudFront website URL
+    Value: !Sub 'https://${Distribution.DomainName}'
+
+  WebsiteBucket:
+    Value: !Ref WebsiteBucket

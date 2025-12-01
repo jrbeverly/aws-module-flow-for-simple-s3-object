@@ -1,0 +1,5 @@
+{
+    "artifact_type": "MODULE",
+    "typeName": "Company::S3::ObjectProvider::MODULE",
+    "settings": {}
+}

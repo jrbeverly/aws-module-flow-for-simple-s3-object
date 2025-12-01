@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Lambda-backed provider for Custom::S3Object resources.
+
+Parameters:
+  BucketArn:
+    Type: String
+    Description: ARN of the S3 bucket the provider Lambda may write to.
+
+Resources:
+  HandlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3ObjectAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub '${BucketArn}/*'
+
+  Handler:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt HandlerRole.Arn
+      Runtime: nodejs22.x
+      Timeout: 60
+      Code:
+        ZipFile: |
+          const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+          const https = require("https");
+
+          const s3 = new S3Client();
+
+          function respond(event, context, status, data) {
+            const body = JSON.stringify({
+              Status: status,
+              Reason: "See the details in CloudWatch Log Stream: " + context.logStreamName,
+              PhysicalResourceId: event.PhysicalResourceId || event.LogicalResourceId,
+              StackId: event.StackId,
+              RequestId: event.RequestId,
+              LogicalResourceId: event.LogicalResourceId,
+              Data: data,
+            });
+            const request = https.request(event.ResponseURL, {
+              method: "PUT",
+              headers: {
+                "content-type": "",
+                "content-length": Buffer.byteLength(body),
+              },
+            });
+            request.on("error", () => {});
+            request.write(body);
+            request.end();
+          }
+
+          exports.handler = async (event, context) => {
+            const properties = event.ResourceProperties;
+            try {
+              if (event.RequestType === "Delete") {
+                await s3.send(
+                  new DeleteObjectCommand({ Bucket: properties.Bucket, Key: properties.Key })
+                );
+              } else {
+                const params = {
+                  Bucket: properties.Bucket,
+                  Key: properties.Key,
+                  Body: properties.Body,
+                  ContentType: properties.ContentType,
+                };
+                if (properties.CacheControl) {
+                  params.CacheControl = properties.CacheControl;
+                }
+                await s3.send(new PutObjectCommand(params));
+              }
+              respond(event, context, "SUCCESS");
+            } catch (error) {
+              respond(event, context, "FAILED", { Error: String(error) });
+            }
+          };

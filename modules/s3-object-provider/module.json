@@ -1,0 +1,10 @@
+{
+    "name": "s3-object-provider",
+    "typeName": "Company::S3::ObjectProvider::MODULE",
+    "description": "Lambda-backed custom-resource provider that puts and deletes S3 objects within the CloudFormation lifecycle.",
+    "version": "1.0.0",
+    "schema": "schema.json",
+    "settings": {
+        "module": true
+    }
+}
